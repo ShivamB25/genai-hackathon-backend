@@ -1,0 +1,495 @@
+# Better LLM - Extracted Python Code and Explanations
+
+This document contains extracted Python code, structured functions, and explanations from the provided `llms.txt` file.
+
+## Multi-Agent Systems in ADK
+
+The Agent Development Kit (ADK) supports building sophisticated applications by composing multiple, distinct `BaseAgent` instances into a **Multi-Agent System (MAS)**. This approach enhances modularity, specialization, and reusability.
+
+### 1. Agent Hierarchy
+
+A foundational concept in ADK is the parent-child relationship between agents. This hierarchy defines the structure of the multi-agent system and is crucial for workflow management and delegation.
+
+**How it works:**
+- A parent agent is initialized with a list of sub-agents.
+- The ADK framework automatically establishes the parent-child relationship.
+- An agent can only have one parent, ensuring a clear hierarchical structure.
+
+```python
+# Conceptual Example: Defining Hierarchy
+from google.adk.agents import LlmAgent, BaseAgent
+
+# Define individual agents
+greeter = LlmAgent(name="Greeter", model="gemini-2.0-flash")
+task_doer = BaseAgent(name="TaskExecutor") # Custom non-LLM agent
+
+# Create parent agent and assign children via sub_agents
+coordinator = LlmAgent(
+    name="Coordinator",
+    model="gemini-2.0-flash",
+    description="I coordinate greetings and tasks.",
+    sub_agents=[ # Assign sub_agents here
+        greeter,
+        task_doer
+    ]
+)
+
+# Framework automatically sets:
+# assert greeter.parent_agent == coordinator
+# assert task_doer.parent_agent == coordinator
+```
+
+### 2. Workflow Agents as Orchestrators
+
+ADK includes specialized agents that orchestrate the execution flow of their sub-agents without performing tasks themselves.
+
+#### SequentialAgent
+
+Executes sub-agents one after another, allowing for the creation of pipelines where the output of one step becomes the input for the next.
+
+**How it works:**
+- Sub-agents are executed in the order they are listed.
+- The same `InvocationContext` is passed to each sub-agent, enabling them to share state.
+
+```python
+# Conceptual Example: Sequential Pipeline
+from google.adk.agents import SequentialAgent, LlmAgent
+
+step1 = LlmAgent(name="Step1_Fetch", output_key="data") # Saves output to state['data']
+step2 = LlmAgent(name="Step2_Process", instruction="Process data from {data}.")
+
+pipeline = SequentialAgent(name="MyPipeline", sub_agents=[step1, step2])
+# When pipeline runs, Step2 can access the state['data'] set by Step1.
+```
+
+#### ParallelAgent
+
+Executes sub-agents in parallel, which can significantly reduce latency for independent tasks.
+
+**How it works:**
+- All sub-agents are executed concurrently.
+- Each sub-agent receives a distinct `InvocationContext.branch`, but they all share the same session state.
+
+```python
+# Conceptual Example: Parallel Execution
+from google.adk.agents import ParallelAgent, LlmAgent
+
+fetch_weather = LlmAgent(name="WeatherFetcher", output_key="weather")
+fetch_news = LlmAgent(name="NewsFetcher", output_key="news")
+
+gatherer = ParallelAgent(name="InfoGatherer", sub_agents=[fetch_weather, fetch_news])
+# When gatherer runs, WeatherFetcher and NewsFetcher run concurrently.
+# A subsequent agent could read state['weather'] and state['news'].
+```
+
+#### LoopAgent
+
+Executes sub-agents in a loop, which is useful for tasks that require iterative refinement or polling.
+
+**How it works:**
+- Sub-agents are executed sequentially within a loop.
+- The loop can be terminated by reaching a maximum number of iterations or by a sub-agent escalating an event.
+
+```python
+# Conceptual Example: Loop with Condition
+from google.adk.agents import LoopAgent, LlmAgent, BaseAgent
+from google.adk.events import Event, EventActions
+from google.adk.agents.invocation_context import InvocationContext
+from typing import AsyncGenerator
+
+class CheckCondition(BaseAgent): # Custom agent to check state
+    async def _run_async_impl(self, ctx: InvocationContext) -> AsyncGenerator[Event, None]:
+        status = ctx.session.state.get("status", "pending")
+        is_done = (status == "completed")
+        yield Event(author=self.name, actions=EventActions(escalate=is_done)) # Escalate if done
+
+process_step = LlmAgent(name="ProcessingStep") # Agent that might update state['status']
+
+poller = LoopAgent(
+    name="StatusPoller",
+    max_iterations=10,
+    sub_agents=[process_step, CheckCondition(name="Checker")]
+)
+# When poller runs, it executes process_step then Checker repeatedly
+# until Checker escalates (state['status'] == 'completed') or 10 iterations pass.
+```
+
+### 3. Interaction & Communication Mechanisms
+
+Agents within a multi-agent system can communicate and share data through several mechanisms.
+
+#### a) Shared Session State (`session.state`)
+
+The most common way for agents to communicate is by reading and writing to a shared session state.
+
+**How it works:**
+- One agent writes data to the session state using a specific key.
+- Another agent reads the data from the session state using the same key.
+- The `output_key` property on `LlmAgent` provides a convenient way to automatically save an agent's output to the state.
+
+```python
+# Conceptual Example: Using output_key and reading state
+from google.adk.agents import LlmAgent, SequentialAgent
+
+agent_A = LlmAgent(name="AgentA", instruction="Find the capital of France.", output_key="capital_city")
+agent_B = LlmAgent(name="AgentB", instruction="Tell me about the city stored in {capital_city}.")
+
+pipeline = SequentialAgent(name="CityInfo", sub_agents=[agent_A, agent_B])
+# AgentA runs, saves "Paris" to state['capital_city'].
+# AgentB runs, its instruction processor reads state['capital_city'] to get "Paris".
+```
+
+#### b) LLM-Driven Delegation (Agent Transfer)
+
+An `LlmAgent` can use its reasoning capabilities to dynamically delegate tasks to other agents in the hierarchy.
+
+**How it works:**
+- The agent's LLM generates a `transfer_to_agent` function call.
+- The ADK framework intercepts this call and transfers execution to the target agent.
+- This requires clear instructions for the delegating agent and descriptive descriptions for the target agents.
+
+```python
+# Conceptual Setup: LLM Transfer
+from google.adk.agents import LlmAgent
+
+booking_agent = LlmAgent(name="Booker", description="Handles flight and hotel bookings.")
+info_agent = LlmAgent(name="Info", description="Provides general information and answers questions.")
+
+coordinator = LlmAgent(
+    name="Coordinator",
+    model="gemini-2.0-flash",
+    instruction="You are an assistant. Delegate booking tasks to Booker and info requests to Info.",
+    description="Main coordinator.",
+    # AutoFlow is typically used implicitly here
+    sub_agents=[booking_agent, info_agent]
+)
+# If coordinator receives "Book a flight", its LLM should generate:
+# FunctionCall(name='transfer_to_agent', args={'agent_name': 'Booker'})
+# ADK framework then routes execution to booking_agent.
+```
+
+#### c) Explicit Invocation (`AgentTool`)
+
+An `LlmAgent` can be configured to treat another `BaseAgent` as a callable tool.
+
+**How it works:**
+- The target agent is wrapped in an `AgentTool` and included in the parent agent's `tools` list.
+- The parent agent's LLM can then generate a function call to the `AgentTool`.
+- The framework executes the `AgentTool`, which in turn runs the target agent and returns its response as the tool's result.
+
+```python
+# Conceptual Setup: Agent as a Tool
+from google.adk.agents import LlmAgent, BaseAgent
+from google.adk.tools import agent_tool
+from pydantic import BaseModel
+from google.adk.events import Event
+from google.genai import types
+
+# Define a target agent (could be LlmAgent or custom BaseAgent)
+class ImageGeneratorAgent(BaseAgent): # Example custom agent
+    name: str = "ImageGen"
+    description: str = "Generates an image based on a prompt."
+    # ... internal logic ...
+    async def _run_async_impl(self, ctx): # Simplified run logic
+        prompt = ctx.session.state.get("image_prompt", "default prompt")
+        # ... generate image bytes ...
+        image_bytes = b"..."
+        yield Event(author=self.name, content=types.Content(parts=[types.Part.from_bytes(image_bytes, "image/png")]))
+
+image_agent = ImageGeneratorAgent()
+image_tool = agent_tool.AgentTool(agent=image_agent) # Wrap the agent
+
+# Parent agent uses the AgentTool
+artist_agent = LlmAgent(
+    name="Artist",
+    model="gemini-2.0-flash",
+    instruction="Create a prompt and use the ImageGen tool to generate the image.",
+    tools=[image_tool] # Include the AgentTool
+)
+# Artist LLM generates a prompt, then calls:
+# FunctionCall(name='ImageGen', args={'image_prompt': 'a cat wearing a hat'})
+# Framework calls image_tool.run_async(...), which runs ImageGeneratorAgent.
+# The resulting image Part is returned to the Artist agent as the tool result.
+```
+
+## Increase tool performance with parallel execution
+
+To improve the performance of your agents, you can enable parallel execution of tool functions by defining them as asynchronous functions. This is particularly useful for tasks that involve multiple I/O-bound operations, such as API calls or database queries.
+
+### Example of http web call
+This example shows how to make an asynchronous HTTP web call using the `aiohttp` library.
+
+```python
+import aiohttp
+import asyncio
+
+async def get_weather(city: str) -> dict:
+     async with aiohttp.ClientSession() as session:
+         async with session.get(f"http://api.weather.com/{city}") as response:
+             return await response.json()
+```
+
+### Example of database call
+This example demonstrates how to perform an asynchronous database query using the `asyncpg` library.
+
+```python
+import asyncpg
+
+async def query_database(query: str) -> list:
+      async with asyncpg.connect("postgresql://...") as conn:
+          return await conn.fetch(query)
+```
+
+### Example of yielding behavior for long loops
+For long-running loops, you can use `asyncio.sleep(0)` to yield control to the event loop, allowing other tasks to run.
+
+```python
+import asyncio
+
+async def process_data(data: list) -> dict:
+      results = []
+      for i, item in enumerate(data):
+          processed = await process_item(item)  # Yield point
+          results.append(processed)
+
+          # Add periodic yield points for long loops
+          if i % 100 == 0:
+              await asyncio.sleep(0)  # Yield control
+      return {"results": results}
+```
+
+### Example of thread pools for intensive operations
+For CPU-intensive operations, you can use a thread pool to avoid blocking the event loop.
+
+```python
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
+async def cpu_intensive_tool(data: list) -> dict:
+      loop = asyncio.get_event_loop()
+
+      # Use thread pool for CPU-bound work
+      with ThreadPoolExecutor() as executor:
+          result = await loop.run_in_executor(
+              executor,
+              expensive_computation,
+              data
+          )
+      return {"result": result}
+```
+
+### Example of process chunking
+When processing large datasets, you can combine a thread pool with process chunking to improve performance and responsiveness.
+
+```python
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
+async def process_large_dataset(dataset: list) -> dict:
+      results = []
+      chunk_size = 1000
+
+      for i in range(0, len(dataset), chunk_size):
+          chunk = dataset[i:i + chunk_size]
+
+          # Process chunk in thread pool
+          loop = asyncio.get_event_loop()
+          with ThreadPoolExecutor() as executor:
+              chunk_result = await loop.run_in_executor(
+                  executor, process_chunk, chunk
+              )
+
+          results.extend(chunk_result)
+
+          # Yield control between chunks
+          await asyncio.sleep(0)
+
+      return {"total_processed": len(results), "results": results}
+```
+
+## Agent with Tools Example
+
+This example showcases an agent that uses two tools: one to get a weather report and another to analyze sentiment. The agent's instructions guide it on how to use these tools sequentially to respond to user queries.
+
+```python
+# Copyright 2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import asyncio
+from google.adk.agents import Agent
+from google.adk.tools import FunctionTool
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.genai import types
+
+APP_NAME="weather_sentiment_agent"
+USER_ID="user1234"
+SESSION_ID="1234"
+MODEL_ID="gemini-2.0-flash"
+
+# Tool 1
+def get_weather_report(city: str) -> dict:
+    """Retrieves the current weather report for a specified city.
+
+    Returns:
+        dict: A dictionary containing the weather information with a 'status' key ('success' or 'error') and a 'report' key with the weather details if successful, or an 'error_message' if an error occurred.
+    """
+    if city.lower() == "london":
+        return {"status": "success", "report": "The current weather in London is cloudy with a temperature of 18 degrees Celsius and a chance of rain."}
+    elif city.lower() == "paris":
+        return {"status": "success", "report": "The weather in Paris is sunny with a temperature of 25 degrees Celsius."}
+    else:
+        return {"status": "error", "error_message": f"Weather information for '{city}' is not available."}
+
+weather_tool = FunctionTool(func=get_weather_report)
+
+# Tool 2
+def analyze_sentiment(text: str) -> dict:
+    """Analyzes the sentiment of the given text.
+
+    Returns:
+        dict: A dictionary with 'sentiment' ('positive', 'negative', or 'neutral') and a 'confidence' score.
+    """
+    if "good" in text.lower() or "sunny" in text.lower():
+        return {"sentiment": "positive", "confidence": 0.8}
+    elif "rain" in text.lower() or "bad" in text.lower():
+        return {"sentiment": "negative", "confidence": 0.7}
+    else:
+        return {"sentiment": "neutral", "confidence": 0.6}
+
+sentiment_tool = FunctionTool(func=analyze_sentiment)
+
+# Agent
+weather_sentiment_agent = Agent(
+    model=MODEL_ID,
+    name='weather_sentiment_agent',
+    instruction="""You are a helpful assistant that provides weather information and analyzes the sentiment of user feedback.
+**If the user asks about the weather in a specific city, use the 'get_weather_report' tool to retrieve the weather details.**
+**If the 'get_weather_report' tool returns a 'success' status, provide the weather report to the user.**
+**If the 'get_weather_report' tool returns an 'error' status, inform the user that the weather information for the specified city is not available and ask if they have another city in mind.**
+**After providing a weather report, if the user gives feedback on the weather (e.g., 'That's good' or 'I don't like rain'), use the 'analyze_sentiment' tool to understand their sentiment.** Then, briefly acknowledge their sentiment.
+You can handle these tasks sequentially if needed.""",
+    tools=[weather_tool, sentiment_tool]
+)
+
+async def main():
+    """Main function to run the agent asynchronously."""
+    # Session and Runner Setup
+    session_service = InMemorySessionService()
+    # Use 'await' to correctly create the session
+    await session_service.create_session(app_name=APP_NAME, user_id=USER_ID, session_id=SESSION_ID)
+
+    runner = Runner(agent=weather_sentiment_agent, app_name=APP_NAME, session_service=session_service)
+
+    # Agent Interaction
+    query = "weather in london?"
+    print(f"User Query: {query}")
+    content = types.Content(role='user', parts=[types.Part(text=query)])
+
+    # The runner's run method handles the async loop internally
+    events = runner.run(user_id=USER_ID, session_id=SESSION_ID, new_message=content)
+
+    for event in events:
+        if event.is_final_response():
+            final_response = event.content.parts[0].text
+            print("Agent Response:", final_response)
+
+# Standard way to run the main async function
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## Tool Context Example
+
+This example shows how to use `ToolContext` to manage state and control agent flow. The `check_and_transfer` tool uses the `tool_context` to transfer control to a `support_agent` if the user's query contains the word "urgent".
+
+```python
+# Copyright 2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from google.adk.agents import Agent
+from google.adk.tools import FunctionTool
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.adk.tools import ToolContext
+from google.genai import types
+import asyncio
+
+APP_NAME="customer_support_agent"
+USER_ID="user1234"
+SESSION_ID="1234"
+
+def check_and_transfer(query: str, tool_context: ToolContext) -> str:
+    """Checks if the query requires escalation and transfers to another agent if needed."""
+    if "urgent" in query.lower():
+        print("Tool: Detected urgency, transferring to the support agent.")
+        tool_context.actions.transfer_to_agent = "support_agent"
+        return "Transferring to the support agent..."
+    else:
+        return f"Processed query: '{query}'. No further action needed."
+
+escalation_tool = FunctionTool(func=check_and_transfer)
+
+main_agent = Agent(
+    model='gemini-2.0-flash',
+    name='main_agent',
+    instruction="""You are the first point of contact for customer support of an analytics tool. Answer general queries. If the user indicates urgency, use the 'check_and_transfer' tool.""",
+    tools=[check_and_transfer]
+)
+
+support_agent = Agent( 
+    model='gemini-2.0-flash',
+    name='support_agent',
+    instruction="""You are the dedicated support agent. Mentioned you are a support handler and please help the user with their urgent issue."""
+)
+
+main_agent.sub_agents = [support_agent]
+
+# Session and Runner
+async def setup_session_and_runner():
+    session_service = InMemorySessionService()
+    session = await session_service.create_session(app_name=APP_NAME, user_id=USER_ID, session_id=SESSION_ID)
+    runner = Runner(agent=main_agent, app_name=APP_NAME, session_service=session_service)
+    return session, runner
+
+# Agent Interaction
+async def call_agent_async(query):
+    content = types.Content(role='user', parts=[types.Part(text=query)])
+    session, runner = await setup_session_and_runner()
+    events = runner.run_async(user_id=USER_ID, session_id=SESSION_ID, new_message=content)
+
+    async for event in events:
+        if event.is_final_response():
+            final_response = event.content.parts[0].text
+            print("Agent Response: ", final_response)
+
+async def main():
+    await call_agent_async("this is urgent, i cant login")
+
+# Note: In Colab, you can directly use 'await' at the top level.
+# If running this code as a standalone Python script, you'll need to use asyncio.run() or manage the event loop.
+if __name__ == "__main__":
+    asyncio.run(main())
+```

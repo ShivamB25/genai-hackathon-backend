@@ -1,0 +1,56 @@
+# ==============================================================================
+# AI-Powered Trip Planner Backend - Docker Ignore File
+# ==============================================================================
+# This file specifies files and directories to be excluded from the Docker
+# build context, resulting in a smaller, faster, and more secure image.
+# ==============================================================================
+
+# Git files
+.git
+.gitignore
+.gitattributes
+
+# Docker files
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Python virtual environment
+venv/
+.venv/
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local environment files
+.env
+.env.*
+! .env.example
+
+# Test files and directories
+tests/
+.pytest_cache/
+coverage.xml
+.coverage
+
+# Build and distribution artifacts
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Miscellaneous
+*.log
+*.bak
+*.tmp
+*.DS_Store
+Thumbs.db

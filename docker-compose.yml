@@ -1,0 +1,69 @@
+# ==============================================================================
+# AI-Powered Trip Planner Backend - Docker Compose for Local Development
+# ==============================================================================
+# This file defines the services, networks, and volumes for the local
+# development environment.
+#
+# Usage:
+#   docker-compose up -d
+# ==============================================================================
+
+version: '3.8'
+
+services:
+  # Main API Service
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder # Use the builder stage for development
+    container_name: trip-planner-api-dev
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./src:/app/src
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env.development
+    depends_on:
+      - firestore
+      - firebase-auth
+    networks:
+      - trip-planner-net
+
+  # Firebase Firestore Emulator
+  firestore:
+    image: google/cloud-sdk:latest
+    container_name: trip-planner-firestore-emulator
+    command: gcloud beta emulators firestore start --host-port=0.0.0.0:8080
+    ports:
+      - "8080:8080"
+    networks:
+      - trip-planner-net
+
+  # Firebase Auth Emulator
+  firebase-auth:
+    image: google/cloud-sdk:latest
+    container_name: trip-planner-auth-emulator
+    command: gcloud beta emulators auth start --host-port=0.0.0.0:9099
+    ports:
+      - "9099:9099"
+    networks:
+      - trip-planner-net
+
+  # Firebase Emulator UI
+  firebase-ui:
+    image: google/cloud-sdk:latest
+    container_name: trip-planner-firebase-ui
+    command: gcloud beta emulators firestore start --host-port=0.0.0.0:8080 --with-ui --ui-port=4000
+    ports:
+      - "4000:4000"
+    depends_on:
+      - firestore
+      - firebase-auth
+    networks:
+      - trip-planner-net
+
+networks:
+  trip-planner-net:
+    driver: bridge

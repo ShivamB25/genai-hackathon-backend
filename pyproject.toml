@@ -1,0 +1,106 @@
+[project]
+name = "genai-hackathon-backend"
+version = "0.1.0"
+description = "AI-powered personalized trip planner using Google Vertex AI Gemini and FastAPI"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "aiofiles>=24.1.0",
+    "black>=25.9.0",
+    "fastapi>=0.117.1",
+    "firebase-admin>=6.9.0",
+    "firebase-functions>=0.4.3",
+    "google-adk>=1.14.1",
+    "google-ai-generativelanguage>=0.6.15",
+    "google-cloud-aiplatform>=1.115.0",
+    "google-generativeai>=0.8.5",
+    "googlemaps>=4.10.0",
+    "httpx>=0.28.1",
+    "langchain-google-vertexai>=2.1.2",
+    "pydantic-settings>=2.10.1",
+    "pydantic[email]>=2.11.9",
+    "pytest>=8.4.2",
+    "pytest-asyncio>=1.2.0",
+    "python-dotenv>=1.1.1",
+    "python-multipart>=0.0.20",
+    "rich>=14.1.0",
+    "ruff>=0.13.1",
+    "structlog>=25.4.0",
+    "typer>=0.19.1",
+    "uvicorn[standard]>=0.36.0",
+    "vertexai>=1.43.0",
+]
+
+[project.optional-dependencies]
+dev = []
+
+[project.scripts]
+trip-planner = "src.main:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+select = ["E", "W", "F", "I", "N", "UP", "ANN", "S", "B", "A", "COM", "DTZ", "EM", "G", "PIE", "PT", "Q", "RET", "SIM", "TID", "ARG", "PTH", "PD", "PGH", "PL", "TRY", "NPY", "RUF"]
+ignore = [
+    # Core style
+    "S101", "S104", "COM812", "PLR0913", "E501",
+    # Type annotations
+    "ANN401", "ANN003", "ANN001", "ANN201", "ANN206",
+    # Code structure
+    "N806", "PLW0603", "PLC0415", "PLR0912", "PLR0915", "PLR0911",
+    # Imports and exports
+    "UP035", "UP006", "UP007", "UP045", "UP017", "UP041",
+    # Exception handling
+    "TRY300", "TRY301", "TRY003", "EM101", "EM102",
+    # Logging and formatting
+    "G201", "G004", "W293", "W291", "W292", "Q000",
+    # Function arguments and returns
+    "B008", "B007", "RET504", "RET505",
+    # Date/time
+    "DTZ003", "DTZ005",
+    # Magic values and comparisons
+    "PLR2004", "E721",
+    # Other
+    "PTH110", "SIM105", "N818", "PGH003", "ANN202", "S324",
+    # Unused imports and variables
+    "F401", "F841",
+]
+
+[tool.ruff.per-file-ignores]
+"tests/*" = ["S", "ANN", "ARG"]
+
+[tool.black]
+target-version = ["py312"]
+line-length = 88
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+[dependency-groups]
+dev = [
+    "black>=25.9.0",
+    "mypy>=1.18.2",
+    "pre-commit>=4.3.0",
+    "pytest>=8.4.2",
+    "pytest-asyncio>=1.2.0",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.13.1",
+]
