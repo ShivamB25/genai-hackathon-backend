@@ -6,7 +6,7 @@ import firebase_admin
 import pytest
 from firebase_admin import credentials
 from google.cloud import firestore
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 
 # Set environment variables for testing
 os.environ["ENV"] = "testing"
@@ -111,5 +111,6 @@ async def test_app(
 @pytest.fixture
 async def async_client(test_app):
     """Fixture for an async test client."""
-    async with AsyncClient(app=test_app, base_url="http://test") as client:
+    transport = ASGITransport(app=test_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client

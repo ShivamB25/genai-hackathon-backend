@@ -19,7 +19,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Sequence
+from typing import NoReturn, Sequence
 
 # --- Configuration ---
 FIREBASE_CONFIG_FILE = "firebase.json"
@@ -41,9 +41,10 @@ def print_success(message):
     print(f"✅ {message}")
 
 
-def print_error(message):
+def print_error(message: str) -> NoReturn:
     print(f"❌ {message}", file=sys.stderr)
     sys.exit(1)
+
 
 SAFE_EXECUTABLES = {"firebase"}
 
@@ -65,12 +66,12 @@ def run_command(command: Sequence[str], capture_output: bool = False) -> str:
     resolved_command = [_resolve_executable(command[0]), *command[1:]]
 
     try:
-        process = subprocess.run(
+        process = subprocess.run(  # noqa: S603 - executable validated against SAFE_EXECUTABLES
             resolved_command,
             check=True,
             text=True,
             capture_output=capture_output,
-        )  # noqa: S603 - executable validated against SAFE_EXECUTABLES
+        )
         return process.stdout.strip() if capture_output else ""
     except subprocess.CalledProcessError as exc:
         print_error(

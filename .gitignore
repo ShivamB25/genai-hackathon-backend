@@ -215,3 +215,4 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 the-sandbox-460908-i8-5cdb12311a99.json
+.kilocode/rules/code-quality-rules.md

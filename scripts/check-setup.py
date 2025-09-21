@@ -74,12 +74,12 @@ def check_node_version(required_version: Tuple[int, ...]) -> bool:
         return False
 
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603 - command path resolved via shutil.which
             [node_path, "--version"],
             check=True,
             capture_output=True,
             text=True,
-        )  # noqa: S603 - command path resolved via shutil.which
+        )
     except subprocess.CalledProcessError as exc:
         print_error(f"Unable to determine node version: {exc}")
         return False
