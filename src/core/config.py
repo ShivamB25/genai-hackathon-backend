@@ -73,6 +73,7 @@ class BaseConfig(BaseSettings):
     maps_timezone_api_enabled: bool = Field(default=True)
     maps_api_rate_limit: int = Field(default=100)
     maps_api_quota_user: str | None = Field(default=None)
+    ticketmaster_api_key: str | None = Field(default=None)
 
     # Maps API Rate Limiting and Performance
     maps_requests_per_second: float = Field(default=10.0)

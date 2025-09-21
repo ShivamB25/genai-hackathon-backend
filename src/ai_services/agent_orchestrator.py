@@ -9,8 +9,9 @@ import asyncio
 import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from enum import Enum
+from itertools import islice
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
@@ -23,6 +24,7 @@ from src.ai_services.function_tools import get_tool_registry
 from src.ai_services.gemini_agents import AgentRole, BaseAgent
 from src.ai_services.session_manager import get_session_manager
 from src.core.logging import get_logger
+from src.trip_planner.schemas import ActivityType, PriceRange
 
 logger = get_logger(__name__)
 
@@ -354,6 +356,11 @@ class SequentialWorkflowAgent(BaseWorkflowAgent):
                     # Update context with results
                     elif isinstance(result.result, dict):
                         execution.context.update(result.result)
+
+                    if result.success:
+                        await self._enrich_context_after_agent(
+                            result.agent_role, execution.context
+                        )
 
                 execution.completed_steps.append(step.step_id)
 
@@ -834,8 +841,290 @@ class TripPlannerOrchestrator:
 
         logger.info(f"Cleaned up {len(completed_executions)} completed executions")
 
+    async def _enrich_context_after_agent(
+        self, role: AgentRole, context: Dict[str, Any]
+    ) -> None:
+        """Augment workflow context with structured data after agent execution."""
 
-# Global orchestrator instance
+        try:
+            if role == AgentRole.DESTINATION_EXPERT:
+                await self._populate_destination_context(context)
+            elif role == AgentRole.BUDGET_ADVISOR:
+                await self._calculate_budget_context(context)
+            elif role == AgentRole.TRIP_PLANNER:
+                await self._build_itinerary_context(context)
+            elif role in {AgentRole.ITINERARY_OPTIMIZER, AgentRole.OPTIMIZATION_AGENT}:
+                await self._optimize_itinerary_context(context)
+        except Exception as exc:
+            logger.warning(
+                "Context enrichment failed",
+                role=role.value,
+                error=str(exc),
+                exc_info=True,
+            )
+
+    async def _populate_destination_context(self, context: Dict[str, Any]) -> None:
+        destination = context.get("destination")
+        if not destination:
+            return
+
+        tool_kwargs: Dict[str, Any] = {
+            "query": f"top attractions in {destination}",
+        }
+
+        coordinates = context.get("destination_coordinates")
+        if coordinates:
+            tool_kwargs["location"] = (
+                f"{coordinates.get('lat')},{coordinates.get('lng')}"
+            )
+            tool_kwargs["radius"] = 15000
+
+        places_result = await self._safe_tool_call("find_places", **tool_kwargs)
+        if not places_result:
+            return
+
+        context["destination_insights"] = places_result
+        context["points_of_interest"] = places_result.get("places", [])
+
+    async def _calculate_budget_context(self, context: Dict[str, Any]) -> None:
+        destination = context.get("destination")
+        if not destination:
+            return
+
+        duration_days = context.get("duration_days") or len(
+            context.get("itinerary", {}).get("daily_plans", [])
+        )
+        duration_days = max(duration_days or 1, 1)
+
+        budget_result = await self._safe_tool_call(
+            "calculate_trip_budget",
+            destination=destination,
+            duration_days=duration_days,
+            traveler_count=context.get("traveler_count", 1),
+            accommodation_level=context.get("preferences", {})
+            .get("accommodation", {})
+            .get("preferred_level", "mid-range"),
+        )
+
+        if not budget_result:
+            return
+
+        context["budget"] = budget_result
+
+    async def _build_itinerary_context(self, context: Dict[str, Any]) -> None:
+        if context.get("trip_plan_created"):
+            return
+
+        destination = context.get("destination")
+        duration_days = context.get("duration_days", 1)
+        travel_dates = context.get("travel_dates", {})
+        start_date_raw = travel_dates.get("start_date")
+
+        if not destination or not start_date_raw:
+            return
+
+        try:
+            start_date = date.fromisoformat(start_date_raw)
+        except ValueError:
+            logger.warning("Invalid start_date in context", start_date=start_date_raw)
+            return
+
+        daily_places = context.get("points_of_interest") or []
+        if not daily_places:
+            await self._populate_destination_context(context)
+            daily_places = context.get("points_of_interest", [])
+
+        weather_data = await self._safe_tool_call(
+            "get_weather_info",
+            location=destination,
+            date_range=f"{start_date.isoformat()} to {(start_date + timedelta(days=duration_days - 1)).isoformat()}",
+        )
+
+        events_data = await self._safe_tool_call(
+            "get_local_events",
+            location=destination,
+            date_range=f"{start_date.isoformat()} to {(start_date + timedelta(days=duration_days - 1)).isoformat()}",
+        )
+
+        itinerary_payload = {
+            "daily_plans": [],
+        }
+
+        points_iterator = iter(daily_places)
+        for day_index in range(duration_days):
+            plan_date = start_date + timedelta(days=day_index)
+            activities = [
+                self._compose_activity_payload(place_info, destination)
+                for place_info in islice(points_iterator, 0, 3)
+            ]
+
+            if not activities and daily_places:
+                # Restart iterator to distribute attractions across remaining days
+                points_iterator = iter(daily_places)
+                activities = [
+                    self._compose_activity_payload(place_info, destination)
+                    for place_info in islice(points_iterator, 0, 3)
+                ]
+
+            day_plan = {
+                "day_number": day_index + 1,
+                "plan_date": plan_date.isoformat(),
+                "theme": f"Explore {destination}",
+                "activities": [a for a in activities if a],
+                "transportation": [],
+                "meals": [],
+                "accommodation": None,
+                "notes": [
+                    "Allow buffer time for rest",
+                    "Stay hydrated and carry essentials",
+                ],
+            }
+
+            weather_for_day = self._select_weather_for_date(weather_data, plan_date)
+            if weather_for_day:
+                day_plan["weather_forecast"] = weather_for_day
+
+            events_for_day = self._select_events_for_date(events_data, plan_date)
+            if events_for_day:
+                day_plan["local_events"] = events_for_day
+
+            itinerary_payload["daily_plans"].append(day_plan)
+
+        if itinerary_payload["daily_plans"]:
+            context["itinerary"] = itinerary_payload
+            context["trip_plan_created"] = True
+
+    async def _optimize_itinerary_context(self, context: Dict[str, Any]) -> None:
+        if "itinerary" not in context:
+            return
+
+        optimization_result = await self._safe_tool_call(
+            "optimize_itinerary",
+            itinerary_data=context["itinerary"],
+            optimization_criteria=["time", "cost", "experience"],
+        )
+
+        if optimization_result and optimization_result.get("optimized_itinerary"):
+            context["itinerary"] = optimization_result["optimized_itinerary"]
+
+    async def _safe_tool_call(
+        self, tool_name: str, **kwargs
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            return await self.tool_registry.execute_tool(tool_name, **kwargs)
+        except Exception as exc:
+            logger.warning(
+                "Tool execution failed",
+                tool=tool_name,
+                error=str(exc),
+            )
+            return None
+
+    def _compose_activity_payload(
+        self, place_info: Dict[str, Any], destination: str
+    ) -> Optional[Dict[str, Any]]:
+        if not place_info:
+            return None
+
+        place_location = place_info.get("location") or {}
+        address = place_info.get("address")
+
+        place_payload = {
+            "place_id": place_info.get("place_id", str(uuid4())),
+            "name": place_info.get("name", "Experience"),
+            "address": {
+                "formatted_address": address
+                or place_info.get("full_address", destination),
+                "city": place_info.get("city", destination),
+                "country": place_info.get("country", "India"),
+                "location": {
+                    "latitude": place_location.get("lat"),
+                    "longitude": place_location.get("lng"),
+                },
+            },
+            "place_types": place_info.get("types", []),
+            "rating": place_info.get("rating"),
+            "review_count": place_info.get("user_ratings_total"),
+        }
+
+        price_level = place_info.get("price_level")
+        mapped_price: Optional[PriceRange] = None
+        price_mapping = {
+            0: PriceRange.FREE,
+            1: PriceRange.BUDGET,
+            2: PriceRange.MODERATE,
+            3: PriceRange.EXPENSIVE,
+            4: PriceRange.LUXURY,
+        }
+        if isinstance(price_level, int):
+            mapped_price = price_mapping.get(price_level)
+            if mapped_price:
+                place_payload["price_level"] = mapped_price.value
+
+        activity_type = self._map_place_types_to_activity(place_payload["place_types"])
+
+        return {
+            "name": place_info.get("name", "Planned Activity"),
+            "description": place_info.get(
+                "summary", f"Visit {place_info.get('name', 'a highlight in the city')}"
+            ),
+            "activity_type": activity_type.value,
+            "location": place_payload,
+            "duration": 120,
+            "cost": place_info.get("estimated_cost"),
+            "currency": place_info.get("currency", "USD"),
+            "price_range": mapped_price.value if mapped_price else None,
+        }
+
+    def _map_place_types_to_activity(self, place_types: List[str]) -> ActivityType:
+        type_mapping = {
+            "museum": ActivityType.CULTURAL,
+            "art_gallery": ActivityType.CULTURAL,
+            "tourist_attraction": ActivityType.SIGHTSEEING,
+            "park": ActivityType.NATURE,
+            "restaurant": ActivityType.DINING,
+            "bar": ActivityType.NIGHTLIFE,
+            "zoo": ActivityType.FAMILY,
+            "shopping_mall": ActivityType.SHOPPING,
+            "amusement_park": ActivityType.ENTERTAINMENT,
+            "hindu_temple": ActivityType.CULTURAL,
+        }
+
+        for place_type in place_types or []:
+            mapped = type_mapping.get(place_type)
+            if mapped:
+                return mapped
+
+        return ActivityType.SIGHTSEEING
+
+    def _select_weather_for_date(
+        self, weather_data: Optional[Dict[str, Any]], plan_date: date
+    ) -> Optional[Dict[str, Any]]:
+        if not weather_data:
+            return None
+
+        forecast = weather_data.get("forecast", [])
+        for entry in forecast:
+            entry_date = entry.get("date")
+            if entry_date and entry_date == plan_date.isoformat():
+                return entry
+
+        return weather_data.get("current_weather")
+
+    def _select_events_for_date(
+        self, events_data: Optional[Dict[str, Any]], plan_date: date
+    ) -> List[Dict[str, Any]]:
+        if not events_data:
+            return []
+
+        selected: List[Dict[str, Any]] = []
+        for event in events_data.get("events", [])[:3]:
+            if event.get("date") == plan_date.isoformat():
+                selected.append(event)
+
+        return selected
+
+
 _orchestrator: Optional[TripPlannerOrchestrator] = None
 
 

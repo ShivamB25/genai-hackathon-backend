@@ -107,6 +107,26 @@ class LoopWorkflowAgent(BaseWorkflowAgent):
 
 ### ADK Orchestrator Architecture
 
+### Context-Aware Orchestrator Enhancements
+
+Recent changes introduce deterministic context enrichment without deviating from the
+ADK patterns above:
+
+- After each successful **Destination Expert** step, the orchestrator records
+  structured points-of-interest by calling the `find_places` tool.
+- The **Budget Advisor** stage now relies on the enhanced `calculate_trip_budget`
+  tool, transforming Maps price levels into actionable cost breakdowns.
+- When the **Trip Planner** stage completes, the orchestrator assembles the
+  itinerary (daily plans, weather, local events) and raises the
+  `trip_plan_created` flag expected by downstream services.
+- **Optimizer** steps can refine the itinerary using the tool chain, ensuring
+  the shared context always contains an optimized representation before the
+  workflow concludes.
+
+These responsibilities allow the FastAPI layer to persist complete itineraries
+even when agent outputs are terse, and they align the implementation with the
+"workflow enrichment" called out in the original design brief.
+
 ```mermaid
 graph TB
     subgraph "ADK Orchestrator Layer"

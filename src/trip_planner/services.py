@@ -11,6 +11,11 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
+from src.ai_services.agent_factory import (
+    TripComplexity,
+    TripRequirements,
+    get_agent_factory,
+)
 from src.ai_services.agent_orchestrator import (
     TripPlannerOrchestrator,
     WorkflowDefinition,
@@ -18,6 +23,7 @@ from src.ai_services.agent_orchestrator import (
     create_quick_trip_planning_workflow,
     get_trip_planner_orchestrator,
 )
+from src.ai_services.gemini_agents import AgentRole, BaseAgent
 from src.ai_services.session_manager import get_session_manager
 from src.core.logging import get_logger
 from src.database.firestore_client import get_firestore_client
@@ -30,6 +36,7 @@ from src.trip_planner.schemas import (
     DayPlan,
     TripItinerary,
     TripRequest,
+    TripType,
     WorkflowResult,
     calculate_itinerary_metrics,
     validate_itinerary_completeness,
@@ -114,6 +121,18 @@ class TripPlannerService:
             session_id = f"user_{user_id}_trip_session"
             orchestrator = get_trip_planner_orchestrator(session_id)
 
+            # Build agent requirements and provision agents
+            trip_requirements = self._build_trip_requirements(trip_request)
+            agent_factory = get_agent_factory()
+            agent_team = agent_factory.create_agent_team_for_trip(
+                trip_requirements, session_id
+            )
+
+            # Ensure every agent is initialised before registration
+            for agent in agent_team.values():
+                await agent.initialize()
+                await orchestrator.register_agent(agent)
+
             # Select workflow
             if workflow_type == "quick":
                 workflow_def = create_quick_trip_planning_workflow()
@@ -127,7 +146,11 @@ class TripPlannerService:
                 # Submit as background task
                 task = asyncio.create_task(
                     self._execute_trip_workflow(
-                        orchestrator, workflow_def, initial_context, trip_request
+                        orchestrator,
+                        workflow_def,
+                        initial_context,
+                        trip_request,
+                        agent_team,
                     )
                 )
                 # Store task reference for tracking
@@ -149,7 +172,11 @@ class TripPlannerService:
             else:
                 # Execute synchronously
                 return await self._execute_trip_workflow(
-                    orchestrator, workflow_def, initial_context, trip_request
+                    orchestrator,
+                    workflow_def,
+                    initial_context,
+                    trip_request,
+                    agent_team,
                 )
 
         except Exception as e:
@@ -170,6 +197,7 @@ class TripPlannerService:
         workflow_def: WorkflowDefinition,
         initial_context: Dict[str, Any],
         trip_request: TripRequest,
+        agent_team: Dict[AgentRole, BaseAgent],
     ) -> WorkflowResult:
         """Execute trip planning workflow."""
         start_time = datetime.now(timezone.utc)
@@ -190,6 +218,12 @@ class TripPlannerService:
                 # Save itinerary to Firestore
                 if itinerary:
                     await self._save_itinerary(itinerary)
+            else:
+                logger.warning(
+                    "Workflow completed without trip_plan_created flag",
+                    workflow_id=workflow_def.workflow_id,
+                    execution_id=execution.execution_id,
+                )
 
             # Create workflow result
             end_time = datetime.now(timezone.utc)
@@ -244,6 +278,63 @@ class TripPlannerService:
                 errors=[str(e)],
                 user_satisfaction_predicted=None,
             )
+        finally:
+            await self._cleanup_agents(agent_team)
+
+    def _build_trip_requirements(self, trip_request: TripRequest) -> TripRequirements:
+        """Convert TripRequest model into agent factory requirements."""
+
+        complexity = TripComplexity.SIMPLE
+        duration_days = trip_request.duration_days
+
+        if duration_days >= 5 or len(trip_request.additional_destinations) > 0:
+            complexity = TripComplexity.MODERATE
+
+        if (
+            duration_days >= 8
+            or trip_request.special_requirements
+            or trip_request.avoid
+        ):
+            complexity = TripComplexity.COMPLEX
+
+        if trip_request.trip_type in {TripType.BUSINESS, TripType.LUXURY}:
+            complexity = TripComplexity.ENTERPRISE
+
+        return TripRequirements(
+            destination=trip_request.destination,
+            duration_days=duration_days,
+            traveler_count=trip_request.traveler_count,
+            budget_range=(
+                str(trip_request.budget.total_budget) if trip_request.budget else None
+            ),
+            trip_type=trip_request.trip_type.value,
+            complexity=complexity,
+            special_requirements=trip_request.special_requirements,
+            preferred_activities=[
+                activity.value for activity in trip_request.preferred_activities
+            ],
+            transportation_modes=[
+                mode.value for mode in trip_request.transportation_preferences
+            ],
+            accommodation_preferences=trip_request.accommodation_preferences,
+            dietary_restrictions=trip_request.dietary_restrictions,
+            accessibility_needs=trip_request.accessibility_needs,
+        )
+
+    async def _cleanup_agents(self, agent_team: Dict[AgentRole, BaseAgent]) -> None:
+        """Ensure agent resources are released after workflow execution."""
+        cleanup_tasks = []
+        for agent in agent_team.values():
+            try:
+                cleanup_tasks.append(agent.cleanup())
+            except Exception:
+                logger.warning(
+                    "Failed to schedule agent cleanup",
+                    agent_id=agent.agent_id,
+                )
+
+        if cleanup_tasks:
+            await asyncio.gather(*cleanup_tasks, return_exceptions=True)
 
     async def _prepare_trip_context(self, trip_request: TripRequest) -> Dict[str, Any]:
         """Prepare context for AI agents from trip request."""
@@ -332,6 +423,7 @@ class TripPlannerService:
     ) -> Optional[TripItinerary]:
         """Build TripItinerary from workflow context."""
         try:
+            duration_days = trip_request.duration_days
             # Extract itinerary data from context
             itinerary_data = context.get("itinerary", {})
             if not itinerary_data:
@@ -347,7 +439,29 @@ class TripPlannerService:
             # Build budget
             budget_data = context.get("budget", {})
             if budget_data:
-                budget = Budget(**budget_data)
+                breakdown = {
+                    key: Decimal(str(value))
+                    for key, value in budget_data.get(
+                        "daily_cost_breakdown", {}
+                    ).items()
+                }
+                daily_total = Decimal(str(budget_data.get("daily_total", "0")))
+                recommended_total = Decimal(
+                    str(budget_data.get("recommended_budget", "0"))
+                )
+                if recommended_total <= 0:
+                    recommended_total = daily_total * Decimal(duration_days)
+
+                budget = Budget(
+                    total_budget=recommended_total,
+                    currency=budget_data.get("currency", "USD"),
+                    breakdown=breakdown,
+                    contingency_percentage=0.15,
+                    daily_budget=daily_total,
+                    cost_optimization_tips=budget_data.get(
+                        "cost_optimization_tips", []
+                    ),
+                )
             else:
                 total_budget = Decimal("1000.0")
                 budget = Budget(
@@ -379,6 +493,8 @@ class TripPlannerService:
                 itinerary_id=itinerary.itinerary_id,
                 days=len(daily_plans),
             )
+
+            context["trip_plan_created"] = True
 
             return itinerary
 

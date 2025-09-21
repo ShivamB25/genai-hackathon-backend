@@ -221,8 +221,8 @@ flowchart TD
 3. **Budget Advisor Agent**
    - **Role**: Cost optimization and financial planning
    - **Capabilities**: Budget analysis, cost breakdown, optimization
-   - **Functions**: `convert_currency`, `find_places` (for pricing)
-   - **Output**: Budget breakdown and cost analysis
+   - **Functions**: `calculate_trip_budget`, `convert_currency`, `find_places`
+   - **Output**: Budget breakdown and cost analysis based on live Maps data
 
 #### Specialized Support Agents
 
@@ -301,6 +301,24 @@ class TripPlanningAgentFactory:
 ```
 
 ### Workflow Engine Architecture
+
+### Context Enrichment and Tool Orchestration
+
+The updated orchestrator now augments each workflow step with live data so
+downstream agents have a shared, structured context:
+
+- Destination research stages trigger the `find_places` tool, populating
+  `points_of_interest` with Google Maps results.
+- Budget analysis steps invoke the new `calculate_trip_budget` tool which
+  estimates daily costs using nearby lodging, dining, and attraction data.
+- When the Trip Planner agent executes, the orchestrator composes a complete
+  itinerary (including daily plans, activities, weather, and local events)
+  directly into the workflow context and sets the `trip_plan_created` flag.
+- Optional optimization passes call the `optimize_itinerary` chain to refine
+  results before the service persists them.
+
+This enrichment logic keeps the multi-agent workflow aligned with the design in
+the architecture brief while removing the dependence on free-form LLM output.
 
 ```python
 # Workflow execution patterns

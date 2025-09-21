@@ -151,6 +151,9 @@ FIREBASE_CLIENT_EMAIL=your-service@your-project.iam.gserviceaccount.com
 # Google Maps
 GOOGLE_MAPS_API_KEY=your-maps-api-key
 
+# Events API (optional)
+TICKETMASTER_API_KEY=your-ticketmaster-key
+
 # Gemini AI
 GEMINI_MODEL=gemini-2.0-flash-exp
 GEMINI_TEMPERATURE=0.7
@@ -160,6 +163,10 @@ GEMINI_MAX_TOKENS=8192
 JWT_SECRET_KEY=your-super-secret-key
 ALLOWED_ORIGINS=["http://localhost:3000"]
 ```
+
+The weather integration uses [Open-Meteo](https://open-meteo.com/) and does not
+require an API key. If `TICKETMASTER_API_KEY` is omitted, the backend skips live
+event discovery while still returning complete itineraries.
 
 ### Google Cloud Setup
 

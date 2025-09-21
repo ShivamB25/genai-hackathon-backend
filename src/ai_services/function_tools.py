@@ -7,10 +7,11 @@ tool registration and discovery system, and async tool execution with error hand
 import asyncio
 import inspect
 import json
+import os
 import statistics
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -21,6 +22,9 @@ import httpx
 from src.ai_services.exceptions import FunctionCallError
 from src.core.config import settings
 from src.core.logging import get_logger
+from src.maps_services.geocoding_service import get_geocoding_service
+from src.maps_services.places_service import get_places_service
+from src.maps_services.schemas import GeoLocation, PlaceType, PriceLevel
 
 logger = get_logger(__name__)
 
@@ -697,90 +701,207 @@ class TripPlanningTools:
 
                 destination = validated_params["destination"]
                 duration_days = validated_params["duration_days"]
-                traveler_count = validated_params.get("traveler_count", 1)
-                validated_params.get("trip_type", "leisure")
+                traveler_count = max(validated_params.get("traveler_count", 1), 1)
                 accommodation_level = validated_params.get(
                     "accommodation_level", "mid-range"
                 )
 
-                # Base daily costs (mock data - in production, use real pricing APIs)
-                base_costs = {
-                    "budget": {
-                        "accommodation": 25,
-                        "food": 15,
-                        "activities": 10,
-                        "transport": 8,
-                    },
-                    "mid-range": {
-                        "accommodation": 75,
-                        "food": 35,
-                        "activities": 25,
-                        "transport": 20,
-                    },
-                    "luxury": {
-                        "accommodation": 200,
-                        "food": 80,
-                        "activities": 60,
-                        "transport": 50,
-                    },
-                }
+                coordinates = await self._resolve_coordinates(destination)
+                lodging_data: List[Any] = []
+                dining_data: List[Any] = []
+                experience_data: List[Any] = []
 
-                # Destination multipliers (mock data)
-                destination_multipliers = {
-                    "mumbai": 1.2,
-                    "delhi": 1.1,
-                    "goa": 1.4,
-                    "kerala": 1.0,
-                    "rajasthan": 1.1,
-                    "himachal": 0.9,
-                    "default": 1.0,
-                }
+                places_service = get_places_service()
 
-                # Get destination multiplier
-                dest_key = destination.lower()
-                multiplier = destination_multipliers.get(
-                    dest_key, destination_multipliers["default"]
+                if coordinates is not None:
+                    lodging_data = await self._fetch_places(
+                        places_service,
+                        location=coordinates,
+                        radius=10000,
+                        place_type=PlaceType.LODGING,
+                    )
+
+                    dining_data = await self._fetch_places(
+                        places_service,
+                        location=coordinates,
+                        radius=6000,
+                        place_type=PlaceType.RESTAURANT,
+                    )
+
+                    experience_data = await self._fetch_places(
+                        places_service,
+                        location=coordinates,
+                        radius=12000,
+                        keyword="tourist attractions",
+                    )
+
+                cost_estimates = self._build_cost_estimates(
+                    lodging_data,
+                    dining_data,
+                    experience_data,
+                    traveler_count,
+                    accommodation_level,
                 )
 
-                # Get base costs
-                costs = base_costs.get(accommodation_level, base_costs["mid-range"])
+                daily_total = sum(cost_estimates.values())
+                trip_total = daily_total * duration_days
+                contingency = trip_total * 0.15
+                recommended_budget = trip_total + contingency
 
-                # Calculate total budget
-                daily_cost_per_person = sum(costs.values()) * multiplier
-                total_daily_cost = daily_cost_per_person * traveler_count
-                total_trip_cost = total_daily_cost * duration_days
-
-                # Add contingency
-                contingency = total_trip_cost * 0.15  # 15% buffer
-                total_with_contingency = total_trip_cost + contingency
-
-                budget_breakdown = {
+                return {
                     "destination": destination,
                     "duration_days": duration_days,
                     "traveler_count": traveler_count,
-                    "accommodation_level": accommodation_level,
-                    "daily_cost_breakdown": {
-                        category: cost * multiplier * traveler_count
-                        for category, cost in costs.items()
-                    },
-                    "daily_total": total_daily_cost,
-                    "trip_total": total_trip_cost,
+                    "currency": "USD",
+                    "daily_cost_breakdown": cost_estimates,
+                    "daily_total": daily_total,
+                    "trip_total": trip_total,
                     "contingency": contingency,
-                    "recommended_budget": total_with_contingency,
-                    "budget_ranges": {
-                        "minimum": total_trip_cost * 0.8,
-                        "comfortable": total_with_contingency,
-                        "luxury": total_with_contingency * 1.5,
-                    },
-                    "cost_optimization_tips": [
-                        "Book accommodations in advance for better rates",
-                        "Consider local transportation options",
-                        "Mix of paid and free activities",
-                        "Try local cuisine for authentic and affordable meals",
-                    ],
+                    "recommended_budget": recommended_budget,
+                    "cost_optimization_tips": self._build_budget_tips(
+                        accommodation_level
+                    ),
                 }
 
-                return budget_breakdown
+            async def _resolve_coordinates(
+                self, destination: str
+            ) -> Optional[GeoLocation]:
+                geocoding_service = get_geocoding_service()
+                try:
+                    response = await geocoding_service.geocode_address(destination)
+                    if response.results:
+                        geometry = response.results[0].geometry
+                        if geometry and geometry.location:
+                            return geometry.location
+                except Exception as exc:  # pragma: no cover - protective logging
+                    logger.warning(
+                        "Failed to geocode destination",
+                        destination=destination,
+                        error=str(exc),
+                    )
+                return None
+
+            async def _fetch_places(
+                self,
+                places_service,
+                *,
+                location: GeoLocation,
+                radius: int,
+                place_type: Optional[PlaceType] = None,
+                keyword: Optional[str] = None,
+            ) -> List[Any]:
+                try:
+                    if keyword:
+                        response = await places_service.search_text(
+                            query=f"{keyword} near {location.latitude},{location.longitude}",
+                            location=location,
+                            radius=radius,
+                            place_type=place_type,
+                        )
+                    else:
+                        response = await places_service.search_nearby(
+                            location=location,
+                            radius=radius,
+                            place_type=place_type,
+                        )
+                    return response.results
+                except Exception as exc:  # pragma: no cover - protective logging
+                    logger.warning(
+                        "Places API query failed",
+                        keyword=keyword,
+                        type=getattr(place_type, "name", place_type),
+                        error=str(exc),
+                    )
+                    return []
+
+            def _build_cost_estimates(
+                self,
+                lodging_data: List[Any],
+                dining_data: List[Any],
+                experience_data: List[Any],
+                traveler_count: int,
+                accommodation_level: str,
+            ) -> Dict[str, float]:
+                estimates = {
+                    "accommodation": self._estimate_category_cost(
+                        lodging_data, "accommodation", accommodation_level
+                    )
+                    * traveler_count,
+                    "food": self._estimate_category_cost(
+                        dining_data, "food", accommodation_level
+                    )
+                    * traveler_count,
+                    "activities": self._estimate_category_cost(
+                        experience_data, "activities", accommodation_level
+                    )
+                    * traveler_count,
+                    "transport": self._estimate_transport_cost(accommodation_level)
+                    * traveler_count,
+                }
+
+                return estimates
+
+            def _estimate_category_cost(
+                self,
+                places: List[Any],
+                category: str,
+                accommodation_level: str,
+            ) -> float:
+                base_costs = {
+                    0: {"accommodation": 0, "food": 5, "activities": 0},
+                    1: {"accommodation": 45, "food": 15, "activities": 10},
+                    2: {"accommodation": 90, "food": 35, "activities": 30},
+                    3: {"accommodation": 180, "food": 65, "activities": 55},
+                    4: {"accommodation": 300, "food": 95, "activities": 85},
+                }
+
+                multiplier = {
+                    "budget": 0.9,
+                    "mid-range": 1.0,
+                    "luxury": 1.35,
+                }.get(accommodation_level, 1.0)
+
+                prices = []
+                for place in places:
+                    price_level = getattr(place, "price_level", None)
+                    if price_level is None:
+                        continue
+                    reference = base_costs.get(price_level)
+                    if reference and category in reference:
+                        prices.append(reference[category] * multiplier)
+
+                if prices:
+                    return float(statistics.mean(prices))
+
+                # Fall back to heuristic when data unavailable
+                fallback_reference = base_costs[2][category] * multiplier
+                return float(fallback_reference)
+
+            def _estimate_transport_cost(self, accommodation_level: str) -> float:
+                base = {
+                    "budget": 12,
+                    "mid-range": 18,
+                    "luxury": 35,
+                }
+                return float(base.get(accommodation_level, 18))
+
+            def _build_budget_tips(self, accommodation_level: str) -> List[str]:
+                generic_tips = [
+                    "Reserve popular attractions in advance to lock in pricing",
+                    "Group nearby sights to reduce transportation spend",
+                    "Balance premium experiences with free neighbourhood walks",
+                ]
+
+                if accommodation_level == "budget":
+                    generic_tips.append(
+                        "Consider hostels or homestays for affordable lodging"
+                    )
+                elif accommodation_level == "luxury":
+                    generic_tips.append(
+                        "Look for concierge packages that bundle transfers and meals"
+                    )
+
+                return generic_tips
 
         metadata = ToolMetadata(
             name="calculate_trip_budget",
@@ -961,48 +1082,145 @@ class WeatherEventFramework:
                 validated_params = self.validate_parameters(kwargs)
 
                 location = validated_params["location"]
-                date_range = validated_params.get("date_range")
+                start_date, end_date = self._parse_date_range(
+                    validated_params.get("date_range")
+                )
 
-                # Mock weather data (prepare for real API integration)
-                mock_weather = {
+                coordinates = await self._resolve_coordinates(location)
+                if coordinates is None:
+                    return {
+                        "location": location,
+                        "date_range": validated_params.get("date_range"),
+                        "forecast": [],
+                        "message": "Unable to resolve location for weather lookup",
+                    }
+
+                weather_response = await self._fetch_weather_data(
+                    coordinates, start_date, end_date
+                )
+
+                return {
                     "location": location,
-                    "date_range": date_range,
-                    "current_weather": {
-                        "temperature": "28°C",
-                        "condition": "Partly Cloudy",
-                        "humidity": "65%",
-                        "wind_speed": "12 km/h",
-                    },
-                    "forecast": [
-                        {
-                            "date": "2024-01-15",
-                            "high": "30°C",
-                            "low": "22°C",
-                            "condition": "Sunny",
-                        },
-                        {
-                            "date": "2024-01-16",
-                            "high": "31°C",
-                            "low": "23°C",
-                            "condition": "Partly Cloudy",
-                        },
-                        {
-                            "date": "2024-01-17",
-                            "high": "29°C",
-                            "low": "21°C",
-                            "condition": "Light Rain",
-                        },
-                    ],
-                    "travel_recommendations": [
-                        "Pack light rain jacket for potential showers",
-                        "Comfortable walking shoes recommended",
-                        "Sun protection advised for outdoor activities",
-                    ],
-                    "api_integration_ready": True,
-                    "data_source": "Mock Data - Ready for Weather API",
+                    "date_range": (
+                        f"{start_date.isoformat()} to {end_date.isoformat()}"
+                        if start_date and end_date
+                        else validated_params.get("date_range")
+                    ),
+                    "current_weather": weather_response.get("current_weather"),
+                    "forecast": weather_response.get("forecast", []),
+                    "data_source": weather_response.get("data_source"),
                 }
 
-                return mock_weather
+            async def _resolve_coordinates(
+                self, location: str
+            ) -> Optional[GeoLocation]:
+                service = get_geocoding_service()
+                try:
+                    result = await service.geocode_address(location)
+                    if result.results:
+                        geometry = result.results[0].geometry
+                        if geometry and geometry.location:
+                            return geometry.location
+                except Exception as exc:  # pragma: no cover - protective logging
+                    logger.warning(
+                        "Weather geocoding failed",
+                        location=location,
+                        error=str(exc),
+                    )
+                return None
+
+            def _parse_date_range(
+                self, date_range: Optional[str]
+            ) -> Tuple[Optional[date], Optional[date]]:
+                if not date_range:
+                    return None, None
+
+                try:
+                    start_str, end_str = [
+                        part.strip() for part in date_range.split("to")
+                    ]
+                    return date.fromisoformat(start_str), date.fromisoformat(end_str)
+                except Exception:
+                    return None, None
+
+            async def _fetch_weather_data(
+                self,
+                coordinates: GeoLocation,
+                start_date: Optional[date],
+                end_date: Optional[date],
+            ) -> Dict[str, Any]:
+                params = {
+                    "latitude": coordinates.latitude,
+                    "longitude": coordinates.longitude,
+                    "current_weather": True,
+                    "timezone": "auto",
+                    "daily": [
+                        "temperature_2m_max",
+                        "temperature_2m_min",
+                        "precipitation_sum",
+                        "windspeed_10m_max",
+                    ],
+                }
+
+                if start_date and end_date:
+                    params["start_date"] = start_date.isoformat()
+                    params["end_date"] = end_date.isoformat()
+
+                try:
+                    async with httpx.AsyncClient(timeout=20) as client:
+                        response = await client.get(
+                            "https://api.open-meteo.com/v1/forecast", params=params
+                        )
+                        response.raise_for_status()
+                        payload = response.json()
+
+                    forecast = []
+                    daily_data = payload.get("daily", {})
+                    dates = daily_data.get("time", [])
+                    highs = daily_data.get("temperature_2m_max", [])
+                    lows = daily_data.get("temperature_2m_min", [])
+                    precipitation = daily_data.get("precipitation_sum", [])
+
+                    for idx, forecast_date in enumerate(dates):
+                        forecast.append(
+                            {
+                                "date": forecast_date,
+                                "high": (
+                                    f"{highs[idx]:.1f}°C" if idx < len(highs) else None
+                                ),
+                                "low": (
+                                    f"{lows[idx]:.1f}°C" if idx < len(lows) else None
+                                ),
+                                "precipitation": (
+                                    precipitation[idx]
+                                    if idx < len(precipitation)
+                                    else None
+                                ),
+                            }
+                        )
+
+                    current_weather_raw = payload.get("current_weather") or {}
+                    current_weather = {
+                        "temperature": current_weather_raw.get("temperature"),
+                        "windspeed": current_weather_raw.get("windspeed"),
+                        "weathercode": current_weather_raw.get("weathercode"),
+                    }
+
+                    return {
+                        "current_weather": current_weather,
+                        "forecast": forecast,
+                        "data_source": "Open-Meteo",
+                    }
+                except Exception as exc:  # pragma: no cover - external API failures
+                    logger.warning(
+                        "Weather API call failed",
+                        error=str(exc),
+                    )
+                    return {
+                        "current_weather": None,
+                        "forecast": [],
+                        "data_source": "Open-Meteo",
+                    }
 
         metadata = ToolMetadata(
             name="get_weather_info",
@@ -1041,40 +1259,117 @@ class WeatherEventFramework:
 
                 location = validated_params["location"]
                 date_range = validated_params.get("date_range")
-                validated_params.get("event_types", ["cultural", "entertainment"])
+                event_types = validated_params.get("event_types") or [
+                    "cultural",
+                    "entertainment",
+                ]
 
-                # Mock events data (prepare for real API integration)
-                mock_events = {
+                start_date, end_date = self._parse_date_range(date_range)
+
+                api_key = settings.ticketmaster_api_key or os.environ.get(
+                    "TICKETMASTER_API_KEY"
+                )
+
+                if not api_key:
+                    return {
+                        "location": location,
+                        "date_range": date_range,
+                        "events": [],
+                        "message": "Ticketmaster API key not configured. Set TICKETMASTER_API_KEY to enable live event data.",
+                    }
+
+                events = await self._fetch_ticketmaster_events(
+                    api_key, location, start_date, end_date, event_types
+                )
+
+                return {
                     "location": location,
                     "date_range": date_range,
-                    "events": [
-                        {
-                            "name": "Mumbai Cultural Festival",
-                            "date": "2024-01-16",
-                            "type": "cultural",
-                            "location": "NCPA, Nariman Point",
-                            "description": "Traditional music and dance performances",
-                            "ticket_required": True,
-                        },
-                        {
-                            "name": "Street Food Festival",
-                            "date": "2024-01-17",
-                            "type": "culinary",
-                            "location": "Bandra West",
-                            "description": "Local street food vendors and cooking demos",
-                            "ticket_required": False,
-                        },
-                    ],
-                    "recommendations": [
-                        "Book cultural event tickets in advance",
-                        "Check local event calendars for updates",
-                        "Consider seasonal festivals and celebrations",
-                    ],
-                    "api_integration_ready": True,
-                    "data_source": "Mock Data - Ready for Events API",
+                    "events": events,
+                    "data_source": "Ticketmaster Discovery API",
                 }
 
-                return mock_events
+            def _parse_date_range(
+                self, date_range: Optional[str]
+            ) -> Tuple[Optional[date], Optional[date]]:
+                if not date_range:
+                    return None, None
+                try:
+                    start_str, end_str = [
+                        part.strip() for part in date_range.split("to")
+                    ]
+                    return date.fromisoformat(start_str), date.fromisoformat(end_str)
+                except Exception:
+                    return None, None
+
+            async def _fetch_ticketmaster_events(
+                self,
+                api_key: str,
+                location: str,
+                start_date: Optional[date],
+                end_date: Optional[date],
+                event_types: List[str],
+            ) -> List[Dict[str, Any]]:
+                params = {
+                    "apikey": api_key,
+                    "keyword": location,
+                    "size": 10,
+                    "locale": "*",
+                }
+
+                if start_date:
+                    params["startDateTime"] = f"{start_date.isoformat()}T00:00:00Z"
+                if end_date:
+                    params["endDateTime"] = f"{end_date.isoformat()}T23:59:59Z"
+
+                classification_filter = ",".join(event_types)
+                if classification_filter:
+                    params["classificationName"] = classification_filter
+
+                try:
+                    async with httpx.AsyncClient(timeout=20) as client:
+                        response = await client.get(
+                            "https://app.ticketmaster.com/discovery/v2/events",
+                            params=params,
+                        )
+                        response.raise_for_status()
+                        payload = response.json()
+
+                    events_payload = payload.get("_embedded", {}).get("events", [])
+                    events: List[Dict[str, Any]] = []
+                    for event in events_payload:
+                        date_info = event.get("dates", {}).get("start", {})
+                        events.append(
+                            {
+                                "name": event.get("name"),
+                                "date": date_info.get("localDate"),
+                                "time": date_info.get("localTime"),
+                                "url": event.get("url"),
+                                "venue": self._extract_ticketmaster_venue(event),
+                            }
+                        )
+
+                    return events
+                except Exception as exc:  # pragma: no cover - external API failures
+                    logger.warning(
+                        "Ticketmaster API call failed",
+                        error=str(exc),
+                    )
+                    return []
+
+            def _extract_ticketmaster_venue(
+                self, event_payload: Dict[str, Any]
+            ) -> Optional[str]:
+                venues = event_payload.get("_embedded", {}).get("venues", [])
+                if not venues:
+                    return None
+
+                venue = venues[0]
+                name = venue.get("name")
+                city = venue.get("city", {}).get("name")
+                country = venue.get("country", {}).get("name")
+
+                return ", ".join(filter(None, [name, city, country]))
 
         metadata = ToolMetadata(
             name="get_local_events",
