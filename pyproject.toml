@@ -47,6 +47,8 @@ packages = ["src"]
 [tool.ruff]
 target-version = "py312"
 line-length = 88
+
+[tool.ruff.lint]
 select = ["E", "W", "F", "I", "N", "UP", "ANN", "S", "B", "A", "COM", "DTZ", "EM", "G", "PIE", "PT", "Q", "RET", "SIM", "TID", "ARG", "PTH", "PD", "PGH", "PL", "TRY", "NPY", "RUF"]
 ignore = [
     # Core style
@@ -73,7 +75,7 @@ ignore = [
     "F401", "F841",
 ]
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S", "ANN", "ARG"]
 
 [tool.black]

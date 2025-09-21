@@ -4,7 +4,7 @@ This module provides system prompts for trip planning agents, template managemen
 with parameter injection, multi-language support, and context-aware prompt generation.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from functools import lru_cache
 from typing import Any
@@ -102,9 +102,11 @@ class PromptTemplate:
 
             # Add common default values
             render_params.setdefault(
-                "current_date", datetime.now().strftime("%Y-%m-%d")
+                "current_date", datetime.now(timezone.utc).strftime("%Y-%m-%d")
             )
-            render_params.setdefault("current_time", datetime.now().strftime("%H:%M"))
+            render_params.setdefault(
+                "current_time", datetime.now(timezone.utc).strftime("%H:%M")
+            )
             render_params.setdefault("language", self.language.value)
 
             # Render template

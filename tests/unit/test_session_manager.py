@@ -25,7 +25,7 @@ async def test_create_session(session_manager):
     session_id = "session1"
     user_id = "user1"
 
-    session_manager._firestore_client.update_document = an_async_mock()
+    session_manager._firestore_client.update_document = create_async_mock()
 
     session = await session_manager.create_session(
         user_id=user_id, initial_context={"theme": "travel"}
@@ -67,7 +67,7 @@ async def test_update_session(session_manager):
 
 
 # Helper for mocking async functions
-def an_async_mock(*args, **kwargs):
+def create_async_mock(*args, **kwargs):
     m = AsyncMock(*args, **kwargs)
 
     async def mock_coro(*args, **kwargs):

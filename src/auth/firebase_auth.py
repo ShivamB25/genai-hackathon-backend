@@ -313,7 +313,7 @@ async def create_user_profile(uid: str, user_data: dict[str, Any]) -> dict[str, 
         client = get_firestore_client()
 
         # Prepare user profile document
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         profile_data = {
             "uid": uid,
@@ -322,8 +322,8 @@ async def create_user_profile(uid: str, user_data: dict[str, Any]) -> dict[str, 
             "photo_url": user_data.get("photo_url"),
             "phone_number": user_data.get("phone_number"),
             "email_verified": user_data.get("email_verified", False),
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow(),
+            "created_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc),
             "preferences": {
                 "currency": user_data.get("currency", settings.default_budget_currency),
                 "timezone": user_data.get("timezone", settings.default_timezone),

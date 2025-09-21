@@ -29,7 +29,7 @@ async def test_geocode_success(maps_client):
     result = await maps_client.geocode(address="123 Test St")
 
     assert result["status"] == "OK"
-    assert result["results"]["formatted_address"] == "Test Address"
+    assert result["results"][0]["formatted_address"] == "Test Address"
     maps_client._client.get.assert_called_once()
 
 
@@ -51,7 +51,7 @@ async def test_places_nearby_success(maps_client):
     result = await maps_client.places_nearby(location=location, radius=1000)
 
     assert result["status"] == "OK"
-    assert result["results"]["name"] == "Test Place"
+    assert result["results"][0]["name"] == "Test Place"
 
 
 @pytest.mark.asyncio
@@ -68,7 +68,7 @@ async def test_directions_success(maps_client):
     result = await maps_client.directions(origin="start", destination="end")
 
     assert result["status"] == "OK"
-    assert result["routes"]["summary"] == "Test Route"
+    assert result["routes"][0]["summary"] == "Test Route"
 
 
 @pytest.mark.asyncio

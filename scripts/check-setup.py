@@ -55,7 +55,7 @@ def check_python_version(required_version: Tuple[int, ...]) -> bool:
     current_version = sys.version_info[: len(required_version)]
     if _is_version_compatible(current_version, required_version):
         print_success(
-            "python3 version is compatible " f"({'.'.join(map(str, current_version))})."
+            f"python3 version is compatible ({'.'.join(map(str, current_version))})."
         )
         return True
 
@@ -151,7 +151,7 @@ async def main():
         print_success("Core Python dependencies are installed.")
     except ImportError as e:
         print_error(
-            f"Missing Python dependency: {e.name}. " "Please run 'pip install -e .'"
+            f"Missing Python dependency: {e.name}. Please run 'pip install -e .'"
         )
         sys.exit(1)
 

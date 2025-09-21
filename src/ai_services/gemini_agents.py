@@ -755,7 +755,9 @@ class AgentFactory:
             output_format="structured_itinerary",
         )
 
-        agent_id = f"trip_planner_{user_id}_{int(datetime.now().timestamp())}"
+        agent_id = (
+            f"trip_planner_{user_id}_{int(datetime.now(timezone.utc).timestamp())}"
+        )
         agent = GeminiAgent(agent_id, capabilities, session_id)
         agent.update_context(**context)
 
@@ -784,7 +786,7 @@ class AgentFactory:
             requires_context=["destination"],
         )
 
-        agent_id = f"dest_expert_{destination.lower().replace(' ', '_')}_{int(datetime.now().timestamp())}"
+        agent_id = f"dest_expert_{destination.lower().replace(' ', '_')}_{int(datetime.now(timezone.utc).timestamp())}"
         agent = GeminiAgent(agent_id, capabilities, session_id)
         agent.update_context(destination=destination, **context)
 
@@ -818,7 +820,7 @@ class AgentFactory:
             requires_context=["budget_range", "currency"],
         )
 
-        agent_id = f"budget_advisor_{int(datetime.now().timestamp())}"
+        agent_id = f"budget_advisor_{int(datetime.now(timezone.utc).timestamp())}"
         agent = GeminiAgent(agent_id, capabilities, session_id)
         agent.update_context(budget_range=budget_range, currency=currency, **context)
 
@@ -852,7 +854,7 @@ class AgentFactory:
             output_format="structured_data",
         )
 
-        agent_id = f"info_gatherer_{destination.lower().replace(' ', '_')}_{int(datetime.now().timestamp())}"
+        agent_id = f"info_gatherer_{destination.lower().replace(' ', '_')}_{int(datetime.now(timezone.utc).timestamp())}"
         agent = GeminiAgent(agent_id, capabilities, session_id)
         agent.update_context(
             destination=destination, role="information_gathering", **context
@@ -887,9 +889,7 @@ class AgentFactory:
             output_format="structured_itinerary",
         )
 
-        agent_id = (
-            f"itinerary_planner_{trip_duration}days_{int(datetime.now().timestamp())}"
-        )
+        agent_id = f"itinerary_planner_{trip_duration}days_{int(datetime.now(timezone.utc).timestamp())}"
         agent = GeminiAgent(agent_id, capabilities, session_id)
         agent.update_context(
             trip_duration=trip_duration, role="itinerary_planning", **context
@@ -923,7 +923,7 @@ class AgentFactory:
             output_format="optimized_itinerary",
         )
 
-        agent_id = f"optimizer_{len(optimization_criteria)}criteria_{int(datetime.now().timestamp())}"
+        agent_id = f"optimizer_{len(optimization_criteria)}criteria_{int(datetime.now(timezone.utc).timestamp())}"
         agent = GeminiAgent(agent_id, capabilities, session_id)
         agent.update_context(
             optimization_criteria=optimization_criteria, role="optimization", **context
@@ -958,7 +958,7 @@ class AgentFactory:
             output_format="route_plan",
         )
 
-        agent_id = f"route_planner_{len(transportation_modes)}modes_{int(datetime.now().timestamp())}"
+        agent_id = f"route_planner_{len(transportation_modes)}modes_{int(datetime.now(timezone.utc).timestamp())}"
         agent = GeminiAgent(agent_id, capabilities, session_id)
         agent.update_context(
             transportation_modes=transportation_modes, role="route_planning", **context
@@ -994,7 +994,7 @@ class AgentFactory:
             output_format="destination_insights",
         )
 
-        agent_id = f"dest_expert_enhanced_{destination.lower().replace(' ', '_')}_{int(datetime.now().timestamp())}"
+        agent_id = f"dest_expert_enhanced_{destination.lower().replace(' ', '_')}_{int(datetime.now(timezone.utc).timestamp())}"
         agent = GeminiAgent(agent_id, capabilities, session_id)
         agent.update_context(
             destination=destination,
@@ -1031,9 +1031,7 @@ class AgentFactory:
             output_format="budget_analysis",
         )
 
-        agent_id = (
-            f"budget_advisor_enhanced_{currency}_{int(datetime.now().timestamp())}"
-        )
+        agent_id = f"budget_advisor_enhanced_{currency}_{int(datetime.now(timezone.utc).timestamp())}"
         agent = GeminiAgent(agent_id, capabilities, session_id)
         agent.update_context(
             budget_components=budget_components,

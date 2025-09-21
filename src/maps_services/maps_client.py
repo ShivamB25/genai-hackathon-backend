@@ -8,7 +8,7 @@ import asyncio
 import hashlib
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
 import httpx
@@ -240,7 +240,7 @@ class MapsAPIClient:
         client = await self._ensure_client()
         self.stats["total_requests"] += 1
 
-        start_time = datetime.now()
+        start_time = datetime.now(timezone.utc)
         response = None
         try:
             logger.debug(
@@ -255,7 +255,7 @@ class MapsAPIClient:
             response.raise_for_status()
 
             response_data = response.json()
-            request_duration = (datetime.now() - start_time).total_seconds()
+            request_duration = (datetime.now(timezone.utc) - start_time).total_seconds()
 
             logger.debug(
                 "Maps API request completed",

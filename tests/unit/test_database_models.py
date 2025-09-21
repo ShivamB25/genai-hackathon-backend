@@ -69,8 +69,8 @@ def test_itinerary_day_model():
 
     assert day.day_number == 1
     assert len(day.activities) == 1
-    assert isinstance(day.activities, Activity)
-    assert day.activities.location.name == "Eiffel Tower"
+    assert isinstance(day.activities[0], Activity)
+    assert day.activities[0].location.name == "Eiffel Tower"
 
 
 def test_model_serialization():

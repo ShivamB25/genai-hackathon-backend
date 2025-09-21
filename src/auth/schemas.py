@@ -4,7 +4,7 @@ This module defines Pydantic models for user authentication, profiles, and prefe
 with comprehensive validation and serialization.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
@@ -156,10 +156,12 @@ class UserProfile(BaseModel):
 
     # Timestamps
     created_at: datetime = Field(
-        default_factory=datetime.utcnow, description="Account creation timestamp"
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Account creation timestamp",
     )
     updated_at: datetime = Field(
-        default_factory=datetime.utcnow, description="Last profile update timestamp"
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Last profile update timestamp",
     )
     last_login_at: datetime | None = Field(
         default=None, description="Last login timestamp"
@@ -185,8 +187,9 @@ class UserProfile(BaseModel):
         if v is None:
             return v
 
-        now = datetime.utcnow()
-        age = (now - v).days // 365
+        now = datetime.now(timezone.utc)
+        birth_date = v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+        age = (now - birth_date).days // 365
 
         if age < 13:
             msg = "User must be at least 13 years old"
@@ -195,7 +198,7 @@ class UserProfile(BaseModel):
             msg = "Invalid date of birth"
             raise ValueError(msg)
 
-        return v
+        return birth_date
 
 
 class AuthTokenClaims(BaseModel):
@@ -371,5 +374,6 @@ class ApiResponse(BaseModel):
     data: dict | None = Field(default=None, description="Response data")
     errors: list[str] | None = Field(default=None, description="List of error messages")
     timestamp: datetime = Field(
-        default_factory=datetime.utcnow, description="Response timestamp"
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Response timestamp",
     )

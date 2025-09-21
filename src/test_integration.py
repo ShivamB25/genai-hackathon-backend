@@ -7,7 +7,7 @@ and the complete trip planning flow.
 
 import asyncio
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from src.ai_services.agent_communication import get_communication_manager
@@ -186,7 +186,7 @@ async def test_communication_patterns_integration():
             "test_agent_1",
             {
                 "test_data": "integration_test",
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             },
         )
 

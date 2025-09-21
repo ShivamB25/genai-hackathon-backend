@@ -31,7 +31,7 @@ async def test_find_places_by_text(places_service, mock_maps_client):
     places = await places_service.find_places_by_text("Eiffel Tower")
 
     assert len(places) == 1
-    assert places.name == "Eiffel Tower"
+    assert places[0].name == "Eiffel Tower"
     mock_maps_client.places_text_search.assert_called_once_with(
         query="Eiffel Tower", language="en"
     )
@@ -51,7 +51,7 @@ async def test_find_nearby_places(places_service, mock_maps_client):
     )
 
     assert len(places) == 1
-    assert places.name == "Louvre Museum"
+    assert places[0].name == "Louvre Museum"
     mock_maps_client.places_nearby.assert_called_once()
 
 

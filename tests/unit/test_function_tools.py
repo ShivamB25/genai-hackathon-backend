@@ -1,5 +1,6 @@
 import pytest
 
+from src.ai_services.exceptions import FunctionCallError
 from src.ai_services.function_tools import (
     EnhancedToolRegistry,
     ToolCategory,
@@ -62,7 +63,7 @@ async def test_execute_tool_with_json_output(executor):
 @pytest.mark.asyncio
 async def test_execute_nonexistent_tool(executor):
     """Test that executing a nonexistent tool raises an error."""
-    with pytest.raises(Exception):
+    with pytest.raises(FunctionCallError, match="Tool 'nonexistent_tool' not found"):
         await executor.execute_tool("nonexistent_tool")
 
 

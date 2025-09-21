@@ -7,7 +7,7 @@ and agent capabilities registry and discovery.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -518,7 +518,7 @@ class TripPlanningAgentFactory:
         )
 
         # Generate unique agent ID
-        agent_id = f"{role.value}_{requirements.destination.lower().replace(' ', '_')}_{int(datetime.now().timestamp())}"
+        agent_id = f"{role.value}_{requirements.destination.lower().replace(' ', '_')}_{int(datetime.now(timezone.utc).timestamp())}"
 
         # Create agent instance
         agent = GeminiAgent(agent_id, capabilities, session_id)

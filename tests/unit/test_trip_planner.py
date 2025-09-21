@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.trip_planner.schemas import TripRequest
-from src.trip_planner.services import TripPlannerService
+from src.trip_planner.services import TripNotFoundError, TripPlannerService
 
 
 @pytest.fixture
@@ -87,5 +87,5 @@ async def test_get_trip_not_found(trip_planner_service, mock_db_client):
     """Test retrieving a nonexistent trip."""
     mock_db_client.get_document.return_value = None
 
-    with pytest.raises(Exception):
+    with pytest.raises(TripNotFoundError, match="Trip not found: nonexistent"):
         await trip_planner_service.get_trip("nonexistent", "user1")

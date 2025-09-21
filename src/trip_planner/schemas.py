@@ -6,7 +6,7 @@ Activity, Place, and Transportation models, Budget and preference models, and Ag
 response and intermediate result schemas.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
@@ -438,7 +438,8 @@ class TripRequest(BaseModel):
 
     # Metadata
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(), description="Request creation time"
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Request creation time",
     )
     updated_at: Optional[datetime] = Field(None, description="Last update time")
     priority: str = Field(default="normal", description="Request priority")
@@ -514,7 +515,8 @@ class AgentResponse(BaseModel):
 
     # Timestamps
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(), description="Response time"
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Response time",
     )
     expires_at: Optional[datetime] = Field(None, description="Response expiration")
 
@@ -585,7 +587,8 @@ class TripItinerary(BaseModel):
     status: str = Field(default="draft", description="Itinerary status")
     version: int = Field(default=1, description="Itinerary version")
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(), description="Creation time"
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Creation time",
     )
     updated_at: Optional[datetime] = Field(None, description="Last update time")
     created_by_agents: List[str] = Field(
@@ -664,7 +667,8 @@ class WorkflowResult(BaseModel):
 
     # Metadata
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(), description="Result creation time"
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Result creation time",
     )
     workflow_version: str = Field(default="1.0", description="Workflow version used")
 
@@ -714,7 +718,8 @@ class ItineraryOptimization(BaseModel):
     )
 
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(), description="Creation time"
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Creation time",
     )
 
 
@@ -766,7 +771,8 @@ class AgentCapabilityAssessment(BaseModel):
     )
 
     assessed_at: datetime = Field(
-        default_factory=lambda: datetime.now(), description="Assessment time"
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Assessment time",
     )
 
 
@@ -818,17 +824,19 @@ class TripPlanningSession(BaseModel):
 
     # Timestamps
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(), description="Session start"
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Session start",
     )
     last_activity: datetime = Field(
-        default_factory=lambda: datetime.now(), description="Last activity"
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Last activity",
     )
     expires_at: Optional[datetime] = Field(None, description="Session expiration")
 
     def add_itinerary(self, itinerary: TripItinerary) -> None:
         """Add generated itinerary to session."""
         self.generated_itineraries.append(itinerary)
-        self.last_activity = datetime.now()
+        self.last_activity = datetime.now(timezone.utc)
 
     def get_latest_itinerary(self) -> Optional[TripItinerary]:
         """Get the most recently generated itinerary."""
@@ -843,7 +851,7 @@ class TripPlanningSession(BaseModel):
         self.total_execution_time += execution_time
         self.total_tokens_used += tokens_used
         self.function_calls_made += function_calls
-        self.last_activity = datetime.now()
+        self.last_activity = datetime.now(timezone.utc)
 
 
 class TripRecommendation(BaseModel):
@@ -895,7 +903,8 @@ class TripRecommendation(BaseModel):
 
     # Metadata
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(), description="Creation time"
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Creation time",
     )
     tags: List[str] = Field(default_factory=list, description="Recommendation tags")
 
