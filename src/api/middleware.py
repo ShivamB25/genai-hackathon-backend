@@ -170,11 +170,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # Route-specific limits
         self.route_limits = {
-            "/auth/login": (5, 300),  # 5 requests per 5 minutes
-            "/auth/register": (3, 600),  # 3 requests per 10 minutes
-            "/auth/refresh": (10, 300),  # 10 requests per 5 minutes
-            "/trips": (100, 3600),  # 100 requests per hour
-            "/ai/chat": (50, 3600),  # 50 requests per hour
+            "/api/v1/users/complete-profile": (3, 600),  # 3 writes per 10 minutes
+            "/api/v1/users": (50, 3600),  # 50 user operations per hour
+            "/api/v1/trips/plan": (20, 3600),  # 20 trip generations per hour
+            "/api/v1/trips": (100, 3600),  # 100 trip reads/updates per hour
+            "/api/v1/places": (100, 3600),  # 100 maps requests per hour
         }
 
     async def dispatch(self, request: Request, call_next) -> Response:
@@ -253,7 +253,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             # Use a hash of the token as identifier
             import hashlib
 
-            token_hash = hashlib.md5(auth_header.encode()).hexdigest()[:8]
+            token_hash = hashlib.blake2s(
+                auth_header.encode(), digest_size=16
+            ).hexdigest()[:8]
             return f"user:{token_hash}"
 
         # Fall back to IP address
@@ -275,13 +277,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         Returns:
             Tuple[int, int]: (limit, window_seconds)
         """
+        normalized_path = path.rstrip("/") or "/"
+
         # Check exact matches first
-        if path in self.route_limits:
-            return self.route_limits[path]
+        if normalized_path in self.route_limits:
+            return self.route_limits[normalized_path]
 
         # Check prefix matches
         for route_pattern, (limit, window) in self.route_limits.items():
-            if path.startswith(route_pattern):
+            pattern = route_pattern.rstrip("/")
+            if normalized_path.startswith(pattern):
                 return limit, window
 
         # Use default limits

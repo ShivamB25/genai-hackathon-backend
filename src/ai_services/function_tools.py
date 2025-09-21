@@ -602,7 +602,7 @@ class EnhancedFunctionTool(FunctionTool):
 
         # Sort parameters for consistent hashing
         sorted_params = json.dumps(kwargs, sort_keys=True, default=str)
-        return hashlib.md5(sorted_params.encode()).hexdigest()
+        return hashlib.blake2s(sorted_params.encode(), digest_size=16).hexdigest()
 
     def _get_cached_result(self, cache_key: str) -> Any:
         """Get cached result if not expired."""
@@ -1259,7 +1259,12 @@ class ToolRegistry:
 
     def register_tool(self, tool):
         """Register a tool."""
-        self._tools[tool.name] = tool
+        metadata = getattr(tool, "metadata", None)
+        if metadata is None or not getattr(metadata, "name", None):
+            msg = "Tool must expose metadata with a name field"
+            raise ValueError(msg)
+
+        self._tools[tool.metadata.name] = tool
 
     def get_tool(self, name: str):
         """Get a tool by name."""

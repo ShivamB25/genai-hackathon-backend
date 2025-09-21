@@ -5,6 +5,7 @@ AI trip generation, CRUD operations, sharing, and comprehensive validation
 with Firebase authentication integration.
 """
 
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 from fastapi import (
@@ -16,7 +17,7 @@ from fastapi import (
     Query,
     status,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from src.api.dependencies import (
     PaginationParams,
@@ -50,8 +51,8 @@ class TripPlanRequest(BaseModel):
     additional_destinations: List[str] = Field(
         default_factory=list, description="Additional destinations"
     )
-    start_date: str = Field(..., description="Trip start date (YYYY-MM-DD)")
-    end_date: str = Field(..., description="Trip end date (YYYY-MM-DD)")
+    start_date: date = Field(..., description="Trip start date (YYYY-MM-DD)")
+    end_date: date = Field(..., description="Trip end date (YYYY-MM-DD)")
     traveler_count: int = Field(
         default=1, gt=0, le=50, description="Number of travelers"
     )
@@ -80,6 +81,14 @@ class TripPlanRequest(BaseModel):
         default_factory=list, description="Must-include places/activities"
     )
     avoid: List[str] = Field(default_factory=list, description="Things to avoid")
+
+    @model_validator(mode="after")
+    def validate_date_order(self) -> "TripPlanRequest":
+        """Ensure the requested trip ends after it begins."""
+        if self.end_date <= self.start_date:
+            msg = "end_date must be after start_date"
+            raise ValueError(msg)
+        return self
 
 
 class TripUpdateRequest(BaseModel):
@@ -137,7 +146,7 @@ async def create_trip_plan(
     service: TripPlannerService = Depends(get_trip_planner_service),
     workflow_type: str = Query(
         "comprehensive",
-        regex="^(comprehensive|quick)$",
+        pattern="^(comprehensive|quick)$",
         description="Workflow type for trip planning",
     ),
     background: bool = Query(False, description="Execute as background task"),
@@ -147,7 +156,6 @@ async def create_trip_plan(
         user_id = user_context["user_id"]
 
         # Convert request to TripRequest schema
-        from datetime import datetime
         from decimal import Decimal
 
         from src.trip_planner.schemas import (
@@ -157,10 +165,8 @@ async def create_trip_plan(
             TripType,
         )
 
-        # Parse dates
-        start_date = datetime.fromisoformat(trip_request.start_date).date()
-        end_date = datetime.fromisoformat(trip_request.end_date).date()
-        duration_days = (end_date - start_date).days + 1
+        # Compute duration (inclusive) using validated dates
+        duration_days = (trip_request.end_date - trip_request.start_date).days + 1
 
         # Build budget if provided
         budget = None
@@ -198,8 +204,8 @@ async def create_trip_plan(
             user_id=user_id,
             destination=trip_request.destination,
             additional_destinations=trip_request.additional_destinations,
-            start_date=start_date,
-            end_date=end_date,
+            start_date=trip_request.start_date,
+            end_date=trip_request.end_date,
             duration_days=duration_days,
             traveler_count=trip_request.traveler_count,
             trip_type=trip_type,

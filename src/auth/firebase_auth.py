@@ -15,16 +15,21 @@ from firebase_admin.auth import (
     InvalidIdTokenError,
     RevokedIdTokenError,
 )
-from google.cloud import firestore as gcp_firestore
 
 from src.core.config import settings
 from src.core.logging import get_logger
+from src.database.firestore_client import (
+    DocumentNotFoundError,
+    FirestoreClient,
+)
+from src.database.firestore_client import (
+    get_firestore_client as get_firestore_service,
+)
 
 logger = get_logger(__name__)
 
 # Global Firebase app instance
 _firebase_app: firebase_admin.App | None = None
-_firestore_client: gcp_firestore.AsyncClient | None = None
 
 
 class FirebaseAuthError(Exception):
@@ -116,24 +121,6 @@ def initialize_firebase() -> firebase_admin.App:
         error_msg = f"Failed to initialize Firebase Admin SDK: {e!s}"
         logger.error(error_msg, exc_info=True)
         raise FirebaseAuthError(error_msg) from e
-
-
-def get_firestore_client() -> gcp_firestore.AsyncClient:
-    """Get or create async Firestore client.
-
-    Returns:
-        gcp_firestore.AsyncClient: The Firestore async client instance.
-    """
-    global _firestore_client
-
-    if _firestore_client is None:
-        # Ensure Firebase is initialized
-        initialize_firebase()
-        _firestore_client = gcp_firestore.AsyncClient(
-            project=settings.firebase_project_id
-        )
-
-    return _firestore_client
 
 
 async def verify_firebase_token(id_token: str) -> dict[str, Any]:
@@ -273,16 +260,14 @@ async def get_user_profile(uid: str) -> dict[str, Any] | None:
         return None
 
     try:
-        client = get_firestore_client()
+        initialize_firebase()
+        firestore_client: FirestoreClient = get_firestore_service()
 
-        # Get user profile document from Firestore
-        doc_ref = client.collection("users").document(uid)
-        doc = await doc_ref.get()
-
-        if doc.exists:
-            profile_data = doc.to_dict()
+        profile = await firestore_client.get_document("users", uid)
+        if profile:
+            profile.pop("id", None)
             logger.debug("User profile retrieved from Firestore", uid=uid)
-            return profile_data
+            return profile
         logger.debug("User profile not found in Firestore", uid=uid)
         return None
 
@@ -310,10 +295,8 @@ async def create_user_profile(uid: str, user_data: dict[str, Any]) -> dict[str, 
         raise UserCreationError(msg)
 
     try:
-        client = get_firestore_client()
-
-        # Prepare user profile document
-        from datetime import datetime, timezone
+        initialize_firebase()
+        firestore_client: FirestoreClient = get_firestore_service()
 
         profile_data = {
             "uid": uid,
@@ -322,10 +305,10 @@ async def create_user_profile(uid: str, user_data: dict[str, Any]) -> dict[str, 
             "photo_url": user_data.get("photo_url"),
             "phone_number": user_data.get("phone_number"),
             "email_verified": user_data.get("email_verified", False),
-            "created_at": datetime.now(timezone.utc),
-            "updated_at": datetime.now(timezone.utc),
             "preferences": {
-                "currency": user_data.get("currency", settings.default_budget_currency),
+                "currency": user_data.get(
+                    "currency", settings.default_budget_currency
+                ),
                 "timezone": user_data.get("timezone", settings.default_timezone),
                 "language": user_data.get("language", "en"),
                 "country": user_data.get("country", settings.default_country),
@@ -334,20 +317,31 @@ async def create_user_profile(uid: str, user_data: dict[str, Any]) -> dict[str, 
             "terms_accepted": False,
         }
 
-        # Add any additional user data
         if "preferences" in user_data:
             profile_data["preferences"].update(user_data["preferences"])
 
-        # Save to Firestore
-        doc_ref = client.collection("users").document(uid)
-        await doc_ref.set(profile_data, merge=True)
+        try:
+            await firestore_client.update_document(
+                "users", uid, profile_data, merge=True
+            )
+        except DocumentNotFoundError:
+            await firestore_client.create_document(
+                "users", profile_data, document_id=uid
+            )
+
+        stored_profile = await firestore_client.get_document("users", uid)
+        if stored_profile:
+            stored_profile.pop("id", None)
+            profile_payload = stored_profile
+        else:
+            profile_payload = profile_data
 
         logger.info(
             "User profile created/updated successfully",
             uid=uid,
             email=user_data.get("email"),
         )
-        return profile_data
+        return profile_payload
 
     except Exception as e:
         error_msg = f"Failed to create user profile: {e!s}"
@@ -446,16 +440,19 @@ async def delete_user_account(uid: str) -> bool:
     try:
         # Ensure Firebase is initialized
         initialize_firebase()
+        firestore_client: FirestoreClient = get_firestore_service()
 
         # Delete user from Firebase Auth
         await asyncio.to_thread(auth.delete_user, uid)
 
         # Delete user profile from Firestore
-        client = get_firestore_client()
-        doc_ref = client.collection("users").document(uid)
-        await doc_ref.delete()
+        profile_deleted = await firestore_client.delete_document("users", uid)
 
-        logger.info("User account deleted successfully", uid=uid)
+        logger.info(
+            "User account deleted successfully",
+            uid=uid,
+            profile_deleted=profile_deleted,
+        )
         return True
 
     except Exception as e:

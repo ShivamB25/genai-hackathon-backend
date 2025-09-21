@@ -6,6 +6,7 @@ middleware, exception handling, and authentication for the AI-powered trip plann
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import FastAPI
 
@@ -185,7 +186,7 @@ async def health_check() -> dict:
         "service": settings.app_name,
         "version": settings.app_version,
         "checks": checks,
-        "timestamp": logger._context.get("timestamp"),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 

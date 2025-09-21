@@ -4,6 +4,7 @@ import jwt
 
 SECRET_KEY = "test-secret-key-for-testing-only"
 
+
 def generate_mock_jwt(user_id: str, email: str) -> str:
     """
     Generates a mock JWT token for testing purposes.

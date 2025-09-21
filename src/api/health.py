@@ -17,9 +17,10 @@ from src.ai_services.function_tools import get_tool_registry
 from src.ai_services.gemini_agents import get_agent_orchestrator
 from src.ai_services.model_config import get_async_client
 from src.ai_services.session_manager import get_session_manager
-from src.auth.firebase_auth import get_firestore_client, initialize_firebase
+from src.auth.firebase_auth import initialize_firebase
 from src.core.config import settings
 from src.core.logging import get_logger
+from src.database.firestore_client import get_firestore_client
 
 logger = get_logger(__name__)
 

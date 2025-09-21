@@ -163,7 +163,8 @@ class MockAgent(BaseAgent):
         elif self.behavior == MockAgentBehavior.TIMEOUT:
             await asyncio.sleep(10.0)  # Will likely timeout
         elif (
-            self.behavior == MockAgentBehavior.ERROR_PRONE and random.random() < 0.3  # noqa: S311
+            self.behavior == MockAgentBehavior.ERROR_PRONE
+            and random.random() < 0.3  # noqa: S311
         ):
             raise AgentCommunicationError(f"Mock error from {self.agent_id}")
 

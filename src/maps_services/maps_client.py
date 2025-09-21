@@ -99,7 +99,7 @@ class RequestCache:
         # Sort parameters for consistent keys
         sorted_params = sorted(params.items())
         cache_data = f"{url}:{json.dumps(sorted_params, sort_keys=True)}"
-        return hashlib.md5(cache_data.encode()).hexdigest()
+        return hashlib.blake2s(cache_data.encode(), digest_size=16).hexdigest()
 
 
 class MapsAPIClient:
@@ -209,7 +209,7 @@ class MapsAPIClient:
         # Exclude API key from cache key for security
         cache_params = {k: v for k, v in params.items() if k != "key"}
         cache_data = f"{url}:{json.dumps(cache_params, sort_keys=True)}"
-        return hashlib.md5(cache_data.encode()).hexdigest()
+        return hashlib.blake2s(cache_data.encode(), digest_size=16).hexdigest()
 
     async def _make_request(
         self,
