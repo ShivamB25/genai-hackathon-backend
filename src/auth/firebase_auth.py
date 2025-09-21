@@ -306,9 +306,7 @@ async def create_user_profile(uid: str, user_data: dict[str, Any]) -> dict[str, 
             "phone_number": user_data.get("phone_number"),
             "email_verified": user_data.get("email_verified", False),
             "preferences": {
-                "currency": user_data.get(
-                    "currency", settings.default_budget_currency
-                ),
+                "currency": user_data.get("currency", settings.default_budget_currency),
                 "timezone": user_data.get("timezone", settings.default_timezone),
                 "language": user_data.get("language", "en"),
                 "country": user_data.get("country", settings.default_country),
